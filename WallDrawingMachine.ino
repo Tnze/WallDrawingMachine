@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "coordinate.hpp"
 #include "gcode.hpp"
+#include "tasker.hpp"
 // #define BLUETOOTH
 
 #ifdef BLUETOOTH
@@ -12,8 +13,10 @@
 BluetoothSerial SerialBT;
 #endif
 
-Stepper stepperR(100, 32, 33, 25, 26);
-Stepper stepperL(100, 19, 18, 5, 17);
+#define SPEED 500
+
+Stepper stepperR(64, 32, 33, 25, 26);
+Stepper stepperL(64, 19, 18, 5, 17);
 
 void setup()
 {
@@ -21,8 +24,8 @@ void setup()
     SerialBT.begin(BLUETOOTH);
 #endif
     Serial.begin(115200);
-    stepperR.setSpeed(300);
-    stepperL.setSpeed(300);
+    stepperR.setSpeed(1000);
+    stepperL.setSpeed(1000);
 }
 
 Stream *Host;
@@ -41,6 +44,9 @@ void exec_gcode(String line)
     float x = 0, y = 0;
     float M, N;
     int m = 0, n = 0;
+    unsigned long duration;
+    Task *task_list[10];
+
     switch (line[0])
     {
     case 'G':
@@ -81,8 +87,11 @@ void exec_gcode(String line)
             position_status.MoveTo(x, y, m, n);
         Host->printf("// move to (m%d, n%d)\n", m, n);
 
-        stepperL.step(m);
-        stepperR.step(n);
+        duration = sqrtl(m * m + n * n) * 1000 / SPEED;
+        task_list[0] = new MotorTask(stepperL, 0, duration, true, m);
+        task_list[1] = new MotorTask(stepperR, 0, duration, true, n);
+        run_tasks(task_list, 2);
+
         Host->println("ok");
         break;
 

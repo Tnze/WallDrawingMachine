@@ -1,0 +1,8 @@
+{
+    "sketch": "WallDrawingMachine.ino",
+    "configuration": "PSRAM=disabled,PartitionScheme=default,CPUFreq=240,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none",
+    "board": "esp32:esp32:esp32",
+    "programmer": "AVR ISP",
+    "output": "./build",
+    "port": "COM7"
+}

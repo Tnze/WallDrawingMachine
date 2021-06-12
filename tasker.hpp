@@ -18,6 +18,7 @@ public:
   unsigned long start_time;
   unsigned long duration;
   virtual unsigned long run(unsigned long now) = 0;
+	static void run_tasks(Task** task_list, int length);
 };
 
 // class ServoTask : public Task
@@ -69,34 +70,35 @@ public:
   }
 };
 
-void run_tasks(Task **task_list, int task_count)
+void Task::run_tasks(Task** task_list, int task_count)
 {
-  unsigned long start_time = micros(), now = 0, *min_delay, dt, delay_min_i = 0;
-  do
-  {
-    min_delay = &(task_list[delay_min_i]->_last_delay);
-    if (micros() - start_time - now < *min_delay)
-      continue;
-    dt = *min_delay;
-    now += dt;
-    // Run the scatuled task and update delay table
-    for (int i = 0; i < task_count; i++)
-    {
-      unsigned long *last_delay = &(task_list[i]->_last_delay);
-      if (*last_delay == TASK_STEP_RESULT_STOP)
-        continue;
-      task_list[i]->_last_delay -= dt;
-      if (*last_delay <= 0)
-        *last_delay = task_list[i]->run(now);
-    }
-    // Search for next wake-up time
-    for (int i = 0; i < task_count; i++)
-    {
-      unsigned long *last_delay = &(task_list[i]->_last_delay);
-      if (*min_delay == TASK_STEP_RESULT_STOP ||
-          (*last_delay != TASK_STEP_RESULT_STOP &&
-           *last_delay <= *min_delay))
-        delay_min_i = i;
-    }
-  } while (*min_delay != TASK_STEP_RESULT_STOP);
+	unsigned long start_time = micros(), now = 0, dt, delay_min_i = 0;
+	for (;;)
+	{
+		// Search for next wake-up time
+		for (int i = 0; i < task_count; i++)
+		{
+			unsigned long& min_delay = task_list[delay_min_i]->_last_delay;
+			unsigned long& last_delay = task_list[i]->_last_delay;
+			if (min_delay == TASK_STEP_RESULT_STOP ||   // if current-selected taks is finished, or
+				last_delay != TASK_STEP_RESULT_STOP && // the i'th task is not finished and more priority.
+				last_delay <= min_delay)
+				delay_min_i = i;
+		}
+		if (task_list[delay_min_i]->_last_delay == TASK_STEP_RESULT_STOP)
+			return; // all tasks is finished
+		unsigned long& min_delay = task_list[delay_min_i]->_last_delay;
+		while (micros() - start_time - now < min_delay);
+		now += dt = min_delay;
+		// Run the scatuled task and update delay table
+		for (int i = 0; i < task_count; i++)
+		{
+			unsigned long& last_delay = task_list[i]->_last_delay;
+			if (last_delay == TASK_STEP_RESULT_STOP)
+				continue;
+			last_delay = last_delay < dt ? 0 : last_delay - dt;
+			if (last_delay == 0)
+				last_delay = task_list[i]->run(now);
+		}
+	}
 }

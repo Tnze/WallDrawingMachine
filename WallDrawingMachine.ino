@@ -44,19 +44,10 @@ void exec_gcode(String line)
     float x = 0, y = 0;
     float M, N;
     int m = 0, n = 0;
-    unsigned long duration;
-    Task *task_list[10];
 
     switch (line[0])
     {
     case 'G':
-        // if (pen_status != num) // 需要调整笔到高度
-        // {
-        //     // Host->println("pen " + num ? "down" : "up");
-        //     move_servo((pen_status = num) ? PEN_DOWN : PEN_UP);
-        //     delay(300); // 等待舵机就位
-        // }
-
         args = line.substring(first_space + 1);
 
         for (;;) // 读取目标位置
@@ -85,13 +76,14 @@ void exec_gcode(String line)
         }
         if (m == 0 && n == 0)
             position_status.MoveTo(x, y, m, n);
-        Host->printf("// move to (m%d, n%d)\n", m, n);
-
-        duration = sqrtl(m * m + n * n) * 1000 / SPEED;
-        task_list[0] = new MotorTask(stepperL, 0, duration, true, m);
-        task_list[1] = new MotorTask(stepperR, 0, duration, true, n);
-        run_tasks(task_list, 2);
-
+        Host->printf("// move steps: (m%d, n%d)\n", m, n);
+        { // Move (m, n)
+            unsigned long duration = sqrtl(m * m + n * n) * 1000 / SPEED;
+            MotorTask left_task(stepperL, 0, duration, true, m);
+            MotorTask right_task(stepperR, 0, duration, true, n);
+            Task *task_list[] = {&left_task, &right_task};
+            Task::run_tasks(task_list, 2);
+        }
         Host->println("ok");
         break;
 
@@ -113,9 +105,11 @@ void exec_gcode(String line)
             break;
         case 114: // M114 获取当前位置
             position_status.Pos(x, y, M, N);
-            Host->printf("R%f x%f y%f m%f n%f\n",
+            Host->printf("x%f y%f M%f N%f R%f m%d n%d\n",
+                         x, y, M, N,
                          position_status.R,
-                         x, y, M, N);
+                         position_status.m,
+                         position_status.n);
             break;
         case 115: // M115 设置坐标参数
             args = line.substring(first_space + 1);

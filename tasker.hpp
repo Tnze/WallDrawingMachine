@@ -1,4 +1,5 @@
 #include <Stepper.h>
+#include "servo.hpp"
 
 constexpr auto TASK_STEP_RESULT_STOP = -1;
 
@@ -18,29 +19,32 @@ public:
   unsigned long start_time;
   unsigned long duration;
   virtual unsigned long run(unsigned long now) = 0;
-	static void run_tasks(Task** task_list, int length);
+  static void run_tasks(Task **task_list, int length);
 };
 
-// class ServoTask : public Task
-// {
-// public:
-//   int pos_from;
-//   int pos_to;
+class ServoTask : public Task
+{
+public:
+  float pos_from, pos_to;
+  unsigned long wait_time;
 
-//   ServoTask(int start_time, int duration, int from, int to)
-//       : Task(start_time, duration),
-//         pos_from(from),
-//         pos_to(to) {}
-//   int run(int now) override
-//   {
-//     if (now < start_time)
-//       return start_time - now;
-//     int pos = pos_from + (pos_to - pos_from) * (now - start_time) / duration;
-//     // printf("[s%3d]", pos);
-//     return now - start_time > duration ? TASK_STEP_RESULT_STOP
-//                                        : TASK_STEP_RESULT_WAIT;
-//   }
-// };
+  ServoTask(unsigned long start_time, unsigned long duration, int interpolation, float from, float to)
+      : Task(start_time, duration),
+        pos_from(from),
+        pos_to(to),
+        wait_time(duration / interpolation) {}
+  unsigned long run(unsigned long now) override
+  {
+    if (now < start_time)
+      return start_time - now;
+    float pos = pos_from + (pos_to - pos_from) * (now - start_time) / duration;
+    // printf("[s%3d]", pos);
+    move_servo(pos);
+    if (now - start_time >= duration)
+      return TASK_STEP_RESULT_STOP;
+    return wait_time;
+  }
+};
 
 class MotorTask : public Task
 {
@@ -64,41 +68,42 @@ public:
       return start_time - now;
     // printf("[m %s]", direction ? "->" : "<-");
     stepper->step(direction ? 1 : -1);
-    return now - start_time >= duration
-               ? TASK_STEP_RESULT_STOP
-               : (duration - now + start_time) / (--left_steps);
+    if (now - start_time >= duration)
+      return TASK_STEP_RESULT_STOP;
+    return (duration - now + start_time) / (--left_steps);
   }
 };
 
-void Task::run_tasks(Task** task_list, int task_count)
+void Task::run_tasks(Task **task_list, int task_count)
 {
-	unsigned long start_time = micros(), now = 0, dt, delay_min_i = 0;
-	for (;;)
-	{
-		// Search for next wake-up time
-		for (int i = 0; i < task_count; i++)
-		{
-			unsigned long& min_delay = task_list[delay_min_i]->_last_delay;
-			unsigned long& last_delay = task_list[i]->_last_delay;
-			if (min_delay == TASK_STEP_RESULT_STOP ||   // if current-selected taks is finished, or
-				last_delay != TASK_STEP_RESULT_STOP && // the i'th task is not finished and more priority.
-				last_delay <= min_delay)
-				delay_min_i = i;
-		}
-		if (task_list[delay_min_i]->_last_delay == TASK_STEP_RESULT_STOP)
-			return; // all tasks is finished
-		unsigned long& min_delay = task_list[delay_min_i]->_last_delay;
-		while (micros() - start_time - now < min_delay);
-		now += dt = min_delay;
-		// Run the scatuled task and update delay table
-		for (int i = 0; i < task_count; i++)
-		{
-			unsigned long& last_delay = task_list[i]->_last_delay;
-			if (last_delay == TASK_STEP_RESULT_STOP)
-				continue;
-			last_delay = last_delay < dt ? 0 : last_delay - dt;
-			if (last_delay == 0)
-				last_delay = task_list[i]->run(now);
-		}
-	}
+  unsigned long start_time = micros(), now = 0, dt, delay_min_i = 0;
+  for (;;)
+  {
+    // Search for next wake-up time
+    for (int i = 0; i < task_count; i++)
+    {
+      unsigned long &min_delay = task_list[delay_min_i]->_last_delay;
+      unsigned long &last_delay = task_list[i]->_last_delay;
+      if (min_delay == TASK_STEP_RESULT_STOP ||  // if current-selected taks is finished, or
+          last_delay != TASK_STEP_RESULT_STOP && // the i'th task is not finished and more priority.
+              last_delay <= min_delay)
+        delay_min_i = i;
+    }
+    if (task_list[delay_min_i]->_last_delay == TASK_STEP_RESULT_STOP)
+      return; // all tasks is finished
+    unsigned long &min_delay = task_list[delay_min_i]->_last_delay;
+    while (micros() - start_time - now < min_delay)
+      ;
+    now += dt = min_delay;
+    // Run the scatuled task and update delay table
+    for (int i = 0; i < task_count; i++)
+    {
+      unsigned long &last_delay = task_list[i]->_last_delay;
+      if (last_delay == TASK_STEP_RESULT_STOP)
+        continue;
+      last_delay = last_delay < dt ? 0 : last_delay - dt;
+      if (last_delay == 0)
+        last_delay = task_list[i]->run(now);
+    }
+  }
 }

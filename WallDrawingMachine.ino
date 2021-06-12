@@ -3,7 +3,9 @@
 #include "coordinate.hpp"
 #include "gcode.hpp"
 #include "tasker.hpp"
-// #define BLUETOOTH
+#include "servo.hpp"
+
+// #define BLUETOOTH "Wall Drawing Machine"
 
 #ifdef BLUETOOTH
 #include "BluetoothSerial.h"
@@ -24,6 +26,7 @@ void setup()
     SerialBT.begin(BLUETOOTH);
 #endif
     Serial.begin(115200);
+    init_servo();
     stepperR.setSpeed(1000);
     stepperL.setSpeed(1000);
 }
@@ -38,8 +41,8 @@ void exec_gcode(String line)
     String args;
     if (line.length() < 1)
         return;
-    int first_space = line.indexOf(' ');
-    int num = line.substring(1, first_space).toInt();
+    int fs = line.indexOf(' ');
+    int num = line.substring(1, fs).toInt();
 
     float x = 0, y = 0;
     float M, N;
@@ -48,50 +51,70 @@ void exec_gcode(String line)
     switch (line[0])
     {
     case 'G':
-        args = line.substring(first_space + 1);
-
-        for (;;) // 读取目标位置
+        switch (num)
         {
-            char c = args[0];
-            int fs = args.indexOf(' ');
-            String num = args.substring(1, fs == -1 ? args.length() : fs);
-            switch (c)
+        case 0: // G0 移动步进电机
+            args = line.substring(fs + 1);
+
+            for (;;) // 读取目标位置
             {
-            case 'X':
-                x = num.toFloat();
-                break;
-            case 'Y':
-                y = num.toFloat();
-                break;
-            case 'm':
-                m = num.toInt();
-                break;
-            case 'n':
-                n = num.toInt();
-                break;
+                char c = args[0];
+                fs = args.indexOf(' ');
+                String num = args.substring(1, fs == -1 ? args.length() : fs);
+                switch (c)
+                {
+                case 'X':
+                    x = num.toFloat();
+                    break;
+                case 'Y':
+                    y = num.toFloat();
+                    break;
+                case 'm':
+                    m = num.toInt();
+                    break;
+                case 'n':
+                    n = num.toInt();
+                    break;
+                }
+                if (fs == -1)
+                    break;
+                args = args.substring(fs + 1);
             }
-            if (fs == -1)
-                break;
-            args = args.substring(fs + 1);
+            if (m == 0 && n == 0)
+                position_status.MoveTo(x, y, m, n);
+            Host->printf("// move steps: (m%d, n%d)\n", m, n);
+            if (m || n)
+            { // Move (m, n)
+                unsigned long duration = sqrtl(m * m + n * n) * 1000 / SPEED;
+                MotorTask left_task(stepperL, 0, duration, true, m);
+                MotorTask right_task(stepperR, 0, duration, true, n);
+                Task *task_list[] = {&left_task, &right_task};
+                Task::run_tasks(task_list, 2);
+            }
+            Host->println("ok");
+            break;
+
+        case 1: // G1 移动舵机
+            args = line.substring(fs + 1);
+            fs = args.indexOf(' ');
+            String num = args.substring(1, fs == -1 ? args.length() : fs);
+            if (args[0] == 'S')
+            {
+                // String num = args.substring(1, fs == -1 ? args.length() : fs);
+                // ServoTask servo_task(0, 1000, 500, 0.1, 0.4);
+                // Task *task_list[] = {&servo_task};
+                // Task::run_tasks(task_list, 1);
+            }
+            move_servo(num.toFloat());
+            Host->println("ok");
+            break;
         }
-        if (m == 0 && n == 0)
-            position_status.MoveTo(x, y, m, n);
-        Host->printf("// move steps: (m%d, n%d)\n", m, n);
-        { // Move (m, n)
-            unsigned long duration = sqrtl(m * m + n * n) * 1000 / SPEED;
-            MotorTask left_task(stepperL, 0, duration, true, m);
-            MotorTask right_task(stepperR, 0, duration, true, n);
-            Task *task_list[] = {&left_task, &right_task};
-            Task::run_tasks(task_list, 2);
-        }
-        Host->println("ok");
-        break;
 
     case 'M':
         switch (num)
         {
         case 110: // M110 重置行号
-            args = line.substring(first_space + 1);
+            args = line.substring(fs + 1);
             for (;;) // 读取目标位置
             {
                 char c = args[0];
@@ -112,7 +135,7 @@ void exec_gcode(String line)
                          position_status.n);
             break;
         case 115: // M115 设置坐标参数
-            args = line.substring(first_space + 1);
+            args = line.substring(fs + 1);
             for (;;) // 读取目标位置
             {
                 char c = args[0];

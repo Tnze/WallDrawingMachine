@@ -4,21 +4,7 @@
  * @author Tnze <cjd001113@outlook.com>
  */
 #include <cmath>
-
-template <typename T>
-class Vec2
-{
-public:
-    T x, y;
-    Vec2<T> &operator+=(const Vec2<T> rhs)
-    {
-        x += rhs.x;
-        y += rhs.y;
-        return *this;
-    }
-};
-
-typedef Vec2<float> Vec2f;
+#include "tasker.hpp"
 
 class PositionStatus
 {
@@ -57,5 +43,44 @@ public:
         xy_to_mn(x, y, m, n);
         dm = m - dm;
         dn = n - dn;
+    }
+};
+
+// TODO: not implemented
+class LinerMotorTask : public Task
+{
+public:
+    bool direction;
+    Stepper *stepper;
+    int total_steps, walked_steps;
+    float x0, y0, dx, dy, sl;
+
+    LinerMotorTask(Stepper &stepper, unsigned long start_time, unsigned long duration, int steps, float pos, float step_length, float x0, float y0, float x1, float y1)
+        : Task(start_time, duration),
+          stepper(&stepper),
+          direction(steps > 0),
+          total_steps(steps > 0 ? steps : -steps),
+          walked_steps(0), sl(step_length),
+          x0(x0 + pos), y0(y0), dx(x1 - x0), dy(y1 - y0) {}
+    unsigned long run(unsigned long now) override
+    {
+        // not start yet
+        if (now < start_time)
+            return start_time - now;
+        // has been end
+        if (walked_steps >= total_steps || total_steps == 0)
+            return TASK_STEP_RESULT_STOP;
+
+        // calculate velocity
+        float t = (float)walked_steps / (float)total_steps; // between 0 and 1
+        float x = x0 + t * dx;
+        float y = y0 + t * dy;
+        float dt = sl * sqrtf(x * x + y * y) / (dx * x + dy * y);
+
+        // printf("[m %s]", direction ? "->" : "<-");
+        stepper->step(direction ? 1 : -1);
+        walked_steps++;
+
+        return abs(dt * 1000);
     }
 };

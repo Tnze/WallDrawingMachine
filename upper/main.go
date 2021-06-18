@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/mattn/go-colorable"
 	"github.com/tarm/serial"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -20,55 +23,61 @@ const (
 	red    = "\033[31m"
 )
 
-var sendLogger = log.New(colorable.NewColorableStdout(), yellow+"<--- ", log.Ltime|log.Lmicroseconds)
-var recvLogger = log.New(colorable.NewColorableStdout(), blue+"---> ", log.Ltime|log.Lmicroseconds)
-var erroLogger = log.New(colorable.NewColorableStdout(), red+"-!!- ", log.Ltime|log.Lmicroseconds)
-var normLogger = log.New(colorable.NewColorableStdout(), norm+"---- ", log.Ltime|log.Lmicroseconds)
-var succLogger = log.New(colorable.NewColorableStdout(), green+"-ok- ", log.Ltime|log.Lmicroseconds)
+var (
+	port       = flag.String("port", "/dev/serial", "the serial port path")
+	file       = flag.String("input", "", "the file to be send")
+	bufferSize = flag.Int("buffer-size", 5, "the resending buffer size")
+)
 
-var okWaiter = make(chan string, 5) // 命令确认通道，容量决定了发送到下位机的最多命令数
-var resendCh = make(chan int, 5)    // 重发通道
+var sendLogger = log.New(colorable.NewColorableStdout(), yellow+"<--- ", 0)
+var recvLogger = log.New(colorable.NewColorableStdout(), blue+"---> ", 0)
+var erroLogger = log.New(colorable.NewColorableStdout(), red+"-!!- ", 0)
+var normLogger = log.New(colorable.NewColorableStdout(), norm+"---- ", 0)
+var succLogger = log.New(colorable.NewColorableStdout(), green+"-ok- ", 0)
+
+var lb LineBuffer
 
 func main() {
+	// init
+	flag.Parse()
+	lb = newLineBuffer(*bufferSize)
+	c := &serial.Config{Name: *port, Baud: 115200}
 
-	c := &serial.Config{Name: "COM7", Baud: 115200}
+	normLogger.Printf("open serial %s:%d", c.Name, c.Baud)
 	s, err := serial.OpenPort(c)
 	if err != nil {
-		normLogger.Fatal(err)
+		erroLogger.Fatal(err)
 	}
+
+	normLogger.Println("reset line number")
 	fmt.Fprintln(s, "M110 N0")
+
 	go func() {
 		// 发送文件
-		if len(os.Args) > 1 {
-			f, err := os.Open(os.Args[1])
+		if *file != "" {
+			f, err := os.Open(*file)
 			if err != nil {
-				sendLogger.Fatal("open file error: ", err)
+				erroLogger.Print("open file error: ", err)
 			}
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {
 				gcode := scanner.Bytes()
-				if len(gcode) > 0 && gcode[0] == 'G' {
-					okWaiter <- string(gcode)
-				}
-				if err := sendLine(s, gcode); err != nil {
-					sendLogger.Fatal(err)
+				if err := lb.SendLine(s, gcode); err != nil {
+					erroLogger.Fatal(err)
 				}
 			}
+			succLogger.Print("file sending complete")
 		}
 
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			line := scanner.Bytes()
-
-			if len(line) > 0 && line[0] == 'G' {
-				okWaiter <- string(line)
-			}
-			if err := sendLine(s, line); err != nil {
-				sendLogger.Fatal(err)
+			if err := lb.SendLine(s, line); err != nil {
+				erroLogger.Fatal(err)
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			sendLogger.Fatal(err)
+			erroLogger.Fatal(err)
 		}
 	}()
 
@@ -82,24 +91,46 @@ func main() {
 		strline := string(line)
 
 		if strings.HasPrefix(strline, "//") {
-			strline = norm + strline
+			recvLogger.Println(green + strline)
 		} else if strings.HasSuffix(strline, "ok") {
-			<-okWaiter
-			strline = green + strline
-		} else if strings.HasSuffix(strline, "rs") {
-			strline = red + strline
+			lb.Ok()
+			recvLogger.Println(green + strline)
+		} else if strings.HasSuffix(strline, "rs") { // resend request
+			recvLogger.Println(red + strline)
+		} else if strings.HasSuffix(strline, "!!") {
+			recvLogger.Println(red + strline)
+		} else {
+			recvLogger.Println(strline)
 		}
 
-		recvLogger.Print(strline)
 	}
 }
 
-var lastLineCode int
+// LineBuffer store latest N lines of command providing error-resending.
+type LineBuffer struct {
+	lastLineCode int
 
-func sendLine(s io.Writer, gcode []byte) error {
-	prefix := fmt.Sprintf("N%d %s", lastLineCode+1, gcode)
-	lastLineCode++
-	// 计算校验码
+	b     [][]byte
+	limit *semaphore.Weighted
+}
+
+func newLineBuffer(size int) LineBuffer {
+	return LineBuffer{
+		b:     make([][]byte, size),
+		limit: semaphore.NewWeighted(int64(size)),
+	}
+}
+
+func (l *LineBuffer) SendLine(s io.Writer, gcode []byte) error {
+	// spends a token if this is G code
+	// (means that we need a "ok" reply)
+	if len(gcode) > 0 && gcode[0] == 'G' {
+		l.limit.Acquire(context.TODO(), 1)
+	}
+
+	prefix := fmt.Sprintf("N%d %s", l.lastLineCode+1, gcode)
+	l.lastLineCode++
+	// Calculate CRC
 	var cs byte
 	for i := range prefix {
 		cs = cs ^ prefix[i]
@@ -108,4 +139,8 @@ func sendLine(s io.Writer, gcode []byte) error {
 	sendLogger.Print(pl)
 	_, err := s.Write([]byte(pl))
 	return err
+}
+
+func (l *LineBuffer) Ok() {
+	l.limit.Release(1)
 }

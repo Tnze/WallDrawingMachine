@@ -9,5 +9,6 @@ But these are two completely different project, and there is no any reference in
 
 [x] Coordinate convert
 [x] Stepper controll
+[x] Servo controll
 [x] Command-line upper program
 [ ] Graphical upper program

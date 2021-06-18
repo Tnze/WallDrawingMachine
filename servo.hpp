@@ -5,7 +5,7 @@
 
 #define PIN_SERVO 23           // 舵机PWM控制管脚
 #define PWM_CHANNEL 0          // 控制舵机用的系统pwn通道 共16个 这里用0号
-#define DEFAULT_SERVO_POS 0.5  // 默认舵机位置
+#define DEFAULT_SERVO_POS 0.3  // 默认舵机位置
 #define DEFAULT_MOTOR_RATE 0.5 // 默认电机移动速度 (step/ms)
 
 const int MAX_COMPARE = ((1 << 16) - 1); // 65535

@@ -1,6 +1,9 @@
 #include <Stepper.h>
 #include "servo.hpp"
 
+#ifndef TASKER_HPP
+#define TASKER_HPP
+
 constexpr auto TASK_STEP_RESULT_STOP = -1;
 
 constexpr auto TASK_ID_SERVO = 0;
@@ -64,13 +67,17 @@ public:
   }
   unsigned long run(unsigned long now) override
   {
+    // not start yet
     if (now < start_time)
       return start_time - now;
+    // has been end
+    if (left_steps <= 0)
+      return TASK_STEP_RESULT_STOP;
+
     // printf("[m %s]", direction ? "->" : "<-");
     stepper->step(direction ? 1 : -1);
-    if (now - start_time >= duration)
-      return TASK_STEP_RESULT_STOP;
-    return (duration - now + start_time) / (--left_steps);
+
+    return --left_steps ? (duration - now + start_time) / left_steps : TASK_STEP_RESULT_STOP;
   }
 };
 
@@ -107,3 +114,5 @@ void Task::run_tasks(Task **task_list, int task_count)
     }
   }
 }
+
+#endif

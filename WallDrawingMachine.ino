@@ -5,7 +5,7 @@
 #include "tasker.hpp"
 #include "servo.hpp"
 
-// #define BLUETOOTH "Wall Drawing Machine"
+#define BLUETOOTH "Wall Drawing Machine"
 
 #ifdef BLUETOOTH
 #include "BluetoothSerial.h"
@@ -15,7 +15,8 @@
 BluetoothSerial SerialBT;
 #endif
 
-#define SPEED 500
+#define SPEED 200
+#define SPEED_FAST 300
 
 Stepper stepperR(64, 32, 33, 25, 26);
 Stepper stepperL(64, 19, 18, 5, 17);
@@ -51,9 +52,15 @@ void exec_gcode(String line)
     switch (line[0])
     {
     case 'G':
+    {
+        float x0, y0;
+        position_status.Pos(x0, y0, M, N);
+        bool fast_move = false;
         switch (num)
         {
-        case 0: // G0 移动步进电机
+        case 0: // G0 快速移动
+            fast_move = true;
+        case 1: // G1 直线插补
             args = line.substring(fs + 1);
 
             for (;;) // 读取目标位置
@@ -82,19 +89,24 @@ void exec_gcode(String line)
             }
             if (m == 0 && n == 0)
                 position_status.MoveTo(x, y, m, n);
+            else
+                fast_move = false;
             Host->printf("// move steps: (m%d, n%d)\n", m, n);
+
             if (m || n)
             { // Move (m, n)
-                unsigned long duration = sqrtl(m * m + n * n) * 1000 / SPEED;
+                unsigned long duration = sqrtl(m * m + n * n) * 1000 / (fast_move ? SPEED_FAST : SPEED);
+
                 MotorTask left_task(stepperL, 0, duration, true, m);
                 MotorTask right_task(stepperR, 0, duration, true, n);
-                Task *task_list[] = {&left_task, &right_task};
+                Task *task_list[2] = {&left_task, &right_task};
+
                 Task::run_tasks(task_list, 2);
             }
-            Host->println("ok");
+
             break;
 
-        case 1: // G1 移动舵机
+        case 2: // G1 移动舵机
             args = line.substring(fs + 1);
             fs = args.indexOf(' ');
             String num = args.substring(1, fs == -1 ? args.length() : fs);
@@ -106,10 +118,11 @@ void exec_gcode(String line)
                 // Task::run_tasks(task_list, 1);
             }
             move_servo(num.toFloat());
-            Host->println("ok");
+            delay(300);
             break;
         }
-
+        Host->println("ok");
+    }
     case 'M':
         switch (num)
         {
@@ -128,7 +141,7 @@ void exec_gcode(String line)
             break;
         case 114: // M114 获取当前位置
             position_status.Pos(x, y, M, N);
-            Host->printf("x%f y%f M%f N%f R%f m%d n%d\n",
+            Host->printf("// status: x%f y%f M%f N%f R%f m%d n%d\n",
                          x, y, M, N,
                          position_status.R,
                          position_status.m,

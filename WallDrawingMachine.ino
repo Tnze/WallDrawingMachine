@@ -4,6 +4,7 @@
 #include "gcode.hpp"
 #include "tasker.hpp"
 #include "servo.hpp"
+#include <Preferences.h>
 
 #define BLUETOOTH "Wall Drawing Machine"
 
@@ -15,11 +16,32 @@
 BluetoothSerial SerialBT;
 #endif
 
-#define SPEED 200
-#define SPEED_FAST 300
-
+double_t speed, speed_fast;
+Stream *Host;
+PositionStatus position_status(35.0f * PI / 2048.0f, 300, 5587, 5587);
+int32_t last_line_code = 0; // 串口行号
 Stepper stepperR(64, 32, 33, 25, 26);
 Stepper stepperL(64, 19, 18, 5, 17);
+Preferences prefs;
+
+void load_settings()
+{
+    prefs.begin("wall_drawing_machine");
+    if (prefs.getBytesLength("position_status") == sizeof(PositionStatus))
+        prefs.getBytes("position_status", (void *)&position_status, sizeof(PositionStatus));
+    speed = prefs.getDouble("speed", 200);
+    speed_fast = prefs.getDouble("speed_fast", 400);
+    prefs.end();
+}
+
+void save_settings()
+{
+    prefs.begin("wall_drawing_machine");
+    prefs.putBytes("position_status", (void *)&position_status, sizeof(PositionStatus));
+    prefs.putDouble("speed", speed);
+    prefs.putDouble("speed_fast", speed_fast);
+    prefs.end();
+}
 
 void setup()
 {
@@ -31,10 +53,6 @@ void setup()
     stepperR.setSpeed(1000);
     stepperL.setSpeed(1000);
 }
-
-Stream *Host;
-PositionStatus position_status(35.0f * PI / 2048.0f, 300, 5587, 5587);
-int32_t last_line_code = 0; // 串口行号
 
 void exec_gcode(String line)
 {
@@ -95,7 +113,7 @@ void exec_gcode(String line)
 
             if (m || n)
             { // Move (m, n)
-                unsigned long duration = sqrtl(m * m + n * n) * 1000 / (fast_move ? SPEED_FAST : SPEED);
+                unsigned long duration = sqrtl(m * m + n * n) * 1000 / (fast_move ? speed_fast : speed);
 
                 MotorTask left_task(stepperL, 0, duration, true, m);
                 MotorTask right_task(stepperR, 0, duration, true, n);
@@ -163,6 +181,9 @@ void exec_gcode(String line)
                     break;
                 args = args.substring(fs + 1);
             }
+            break;
+        case 401:
+            save_settings();
             break;
         }
         break;
